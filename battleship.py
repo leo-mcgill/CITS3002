@@ -10,6 +10,8 @@ Contains core data structures and logic for Battleship, including:
 
 import random
 
+TEST_MODE = False
+
 BOARD_SIZE = 10
 SHIPS = [
     ("Carrier", 5),
@@ -19,6 +21,13 @@ SHIPS = [
     ("Destroyer", 2)
 ]
 
+"""
+#test Data
+BOARD_SIZE = 2
+SHIPS = [
+    ("Dot", 1)
+]
+"""
 
 class Board:
     """
@@ -39,13 +48,11 @@ class Board:
         opponent_board.fire_at(...) and sends back the result.
     """
 
-    def __init__(self, size=BOARD_SIZE):
+    def __init__(self, size=10):
         self.size = size
-        # '.' for empty water
         self.hidden_grid = [['.' for _ in range(size)] for _ in range(size)]
-        # display_grid is what the player or an observer sees (no 'S')
         self.display_grid = [['.' for _ in range(size)] for _ in range(size)]
-        self.placed_ships = []  # e.g. [{'name': 'Destroyer', 'positions': {(r, c), ...}}, ...]
+        self.placed_ships = []
 
     def place_ships_randomly(self, ships=SHIPS):
         """
@@ -360,3 +367,91 @@ def run_single_player_game_online(rfile, wfile):
 if __name__ == "__main__":
     # Optional: run this file as a script to test single-player mode
     run_single_player_game_locally()
+
+
+class TwoPlayerGame:
+    """
+    Coordinates a 2-player Battleship game with turn management and win condition.
+    """
+    def __init__(self):
+        board_size = 2 if TEST_MODE else 10
+        self.player_boards = [Board(board_size), Board(board_size)]
+        self.current_turn = 0
+        self.active = True
+        self.ships_placed = [False, False]
+    
+
+    def get_current_player_index(self):
+        return self.current_turn
+
+    def get_opponent_index(self):
+        return 1 - self.current_turn
+    
+    def place_ships_for_player(self, player_index, placements):
+        """
+        Allows a player to manually place their ships.
+        `placements` is a list of tuples: (coord_str, orientation_str)
+        where orientation_str is 'H' or 'V'.
+        """
+        board = self.player_boards[player_index]
+        for (coord_str, orientation_str), (ship_name, ship_size) in zip(placements, SHIPS):
+            try:
+                row, col = parse_coordinate(coord_str)
+                if orientation_str.upper() == 'H':
+                    orientation = 0
+                elif orientation_str.upper() == 'V':
+                    orientation = 1
+                else:
+                    return False, f"Invalid orientation: {orientation_str}"
+
+                if not board.can_place_ship(row, col, ship_size, orientation):
+                    return False, f"Cannot place {ship_name} at {coord_str} with orientation {orientation_str}"
+
+                occupied = board.do_place_ship(row, col, ship_size, orientation)
+                board.placed_ships.append({
+                    'name': ship_name,
+                    'positions': occupied
+                })
+            except Exception as e:
+                return False, f"Error placing {ship_name}: {e}"
+
+        self.ships_placed[player_index] = True
+        return True, "All ships placed successfully."
+
+    def fire(self, coord_str):
+        """
+        Handles a fire command from the current player.
+        Returns (result, sunk_ship_name, game_over, display_message)
+        """
+        try:
+            row, col = parse_coordinate(coord_str)
+        except ValueError as e:
+            return ("invalid", None, False, f"Invalid coordinate: {e}")
+
+        opponent_board = self.player_boards[self.get_opponent_index()]
+        result, sunk_ship = opponent_board.fire_at(row, col)
+
+        if result == 'hit':
+            message = f"HIT!{' You sank the ' + sunk_ship + '!' if sunk_ship else ''}"
+        elif result == 'miss':
+            message = "MISS!"
+        elif result == 'already_shot':
+            message = "You've already fired at that location."
+        else:
+            message = "Unknown result."
+
+        if opponent_board.all_ships_sunk():
+            self.active = False
+            return (result, sunk_ship, True, message + " You win!")
+        else:
+            # Switch turns
+            self.current_turn = self.get_opponent_index()
+            return (result, sunk_ship, False, message)
+
+    def get_visible_board_for_player(self, player_index):
+        """
+        Return the display grid of the opponent's board, as seen by this player.
+        """
+        opponent_board = self.player_boards[1 - player_index]
+        return opponent_board.display_grid
+    

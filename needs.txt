@@ -198,3 +198,6 @@ to follow the instruction and run it as you have intended.
 You will also submit a demo video of your game, highlighting key features you implemented in each tier.
 This video should not be more than 10 minutes. You can upload it to your preferred hosting site (e.g,.
 YouTube), and include the link to the video in the report within the first two pages.
+
+
+Due May 19 Midnight
