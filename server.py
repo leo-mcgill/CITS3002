@@ -16,28 +16,34 @@ waiting_clients = []
 waiting_lock = threading.Lock()
 
 def handle_incoming_client(conn, addr):
-    print(f"[INFO] Client connected: {addr}")
-    rfile = conn.makefile('r')
-    wfile = conn.makefile('w')
-
-    with waiting_lock:
-        waiting_clients.append((rfile, wfile, conn))
-
-    # Try to start a game if two players are ready
-    start_match_if_possible()
+    try:
+        rfile = conn.makefile('r')
+        wfile = conn.makefile('w')
+        print(f"[INFO] Client joined: {addr}")
+        lobby_loop(rfile, wfile, conn)
+    except Exception as e:
+        print(f"[ERROR] Client setup failed: {e}")
+        try: conn.close()
+        except: pass
 
 def start_match_if_possible():
     with waiting_lock:
         if len(waiting_clients) >= 2:
-            rfile1, wfile1, conn1 = waiting_clients.pop(0)
-            rfile2, wfile2, conn2 = waiting_clients.pop(0)
+            client1 = waiting_clients.pop(0)
+            client2 = waiting_clients.pop(0)
 
-            game_thread = threading.Thread(
-                target=run_two_player_game_online,
-                args=(rfile1, wfile1, rfile2, wfile2),
-                daemon=True
-            )
-            game_thread.start()
+            rfile1, wfile1, conn1 = client1
+            rfile2, wfile2, conn2 = client2
+
+            print("[INFO] Starting a new game")
+
+            def game_and_return_to_lobby():
+                run_two_player_game_online(rfile1, wfile1, rfile2, wfile2)
+                lobby_loop(rfile1, wfile1, conn1)
+                lobby_loop(rfile2, wfile2, conn2)
+
+            threading.Thread(target=game_and_return_to_lobby, daemon=True).start()
+
 
 
 def run_two_player_game_online(rfile1, wfile1, rfile2, wfile2):
@@ -189,7 +195,7 @@ def run_two_player_game_online(rfile1, wfile1, rfile2, wfile2):
     # Clean up (optional)
     for w in wfiles:
         try:
-            w.write("Game over. Connection will now close.\n")
+            w.write("Game over. Returning to the lobby...\n")
             w.flush()
         except:
             pass
@@ -227,26 +233,32 @@ def main():
     print(f"[INFO] Server listening on {HOST}:{PORT}")
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind((HOST, PORT))
-        s.listen(2)
+        s.listen()
 
         while True:
-            conn1, addr1 = s.accept()
-            print(f"[INFO] Player 1 connected from {addr1}")
-            conn2, addr2 = s.accept()
-            print(f"[INFO] Player 2 connected from {addr2}")
+            conn, addr = s.accept()
+            print(f"[INFO] New client from {addr}")
+            threading.Thread(target=handle_incoming_client, args=(conn, addr), daemon=True).start()
 
-            rfile1 = conn1.makefile('r')
-            wfile1 = conn1.makefile('w')
-            rfile2 = conn2.makefile('r')
-            wfile2 = conn2.makefile('w')
+def lobby_loop(rfile, wfile, conn):
+    try:
+        while True:
+            wfile.write("Waiting for another player...\n")
+            wfile.flush()
 
-            # Start the two-player game
-            game_thread = threading.Thread(
-                target=run_two_player_game_online,
-                args=(rfile1, wfile1, rfile2, wfile2),
-                daemon=True
-            )
-            game_thread.start()
+            with waiting_lock:
+                waiting_clients.append((rfile, wfile, conn))
+
+            while True:
+                with waiting_lock:
+                    if (rfile, wfile, conn) not in waiting_clients:
+                        break  # matched into a game
+                time.sleep(0.5)  # wait to be matched
+
+    except Exception as e:
+        print(f"[INFO] Client disconnected during lobby wait: {e}")
+        try: conn.close()
+        except: pass
 
 if __name__ == "__main__":
     main()
